@@ -1,5 +1,5 @@
 # ESP32FastMillis
-Faster millis() and micros() for ESP32 and AceRoutine
+Faster millis() and micros() for ESP32 and AceRoutine, plus some useful Chrono and Timeout classes.
 
 CoroutineScheduler was calling micros() about 15000 times per second.
 
