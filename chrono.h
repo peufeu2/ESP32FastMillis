@@ -33,24 +33,29 @@ SOFTWARE.
 
 class Chrono {
 public:
-	uint32_t 	last_tick, 	// fastmillis @ last tick() call
-				interval,	// fastmillis between last two tick() calls
-				total;		// fastmillis between reset() and last tick()
+	uint32_t 	last_tick, 	// millis at last tick() call
+				interval,	// "lap time"	ms between last two tick() calls
+				total;		// "total time" ms between reset() and last tick()
 	
 	/*	First call to tick() will return 0ms and set initialized to true.
 		This is to avoid having the first tick() return all the time spent
 		in setup()...
 	*/
-	bool initialized;
+	bool initialized = false;
 
-	Chrono() { initialized = false; }
-
+	/*	Resets both total time and lap time, and starts the chrono
+		by recording current time.
+	*/
 	void reset() { 
 		initialized = true;
 		last_tick = fastmillis(); 
 		total = interval = 0; 
 	}
 
+	/*	Pushes the LAP button on the chronometer, and returns lap time
+		ie, milliseconds since last calls to tick().
+		If the value is needed again, just read member interval.
+	 */
 	uint32_t tick(){
 		unsigned m = fastmillis();
 		if( initialized ) interval = m-last_tick;
@@ -60,6 +65,8 @@ public:
 		return interval;
 	}
 
+	/*	Returns milliseconds since last call to tick().
+	*/
 	unsigned ms_since_tick() {
 		return fastmillis() - last_tick;	
 	}
