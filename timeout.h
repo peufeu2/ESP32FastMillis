@@ -32,10 +32,18 @@ SOFTWARE.
 
 class Timeout {
 public:
-	uint32_t 	_end_millis;
+	uint32_t 	_end_millis;		// when the timeout should end
 	bool 		_expired    = true;
 
-	// initializes timeout
+	/*	To prevent 32 bit wraparound with millis(), one of the functions below
+		should be called before 2^30 ms have passed. Once the timeout has expired,
+		bool _expired is set to true, which remembers it expired for an unlimited
+		amount of time.
+	*/
+
+	/*	Initializes timeout.
+		expired() will return false until it expires, then it will return true.
+	 */
 	void set( unsigned long timeout_ms ) {
 		if( timeout_ms ) {
 			_end_millis = fastmillis() + timeout_ms;
@@ -45,17 +53,15 @@ public:
 		}
 	}
 
+	/*	Mark it as expired now.
+	*/
 	void expire() {
 		_expired = true;
 	}
 
-	/*	To prevent wraparound with fastmillis(), one of the functions below
-		should be called before 2^30 ms have passed. Once the timeout has expired,
-		bool _expired is set to true, which remembers it expired for an unlimited
-		amount of time.
-	*/
 
-	// returns time remaining in ms, zero if expired
+	/*	Returns time remaining in ms, zero if expired
+	*/
 	int32_t remaining() {
 		if( _expired ) return 0;
 		int r = _end_millis - fastmillis();
@@ -66,7 +72,8 @@ public:
 	}
 
 
-	// true if remaining time has expired
+	/* true if timeout has expired
+	*/
 	bool expired() { return !remaining(); }
 
 	/* 	Sets _expired to true if timeout has expired.
@@ -74,3 +81,15 @@ public:
 		calling it tick() makes it more explicit. */
 	void tick()  { remaining(); }	
 };
+
+
+
+
+
+
+
+
+
+
+
+
