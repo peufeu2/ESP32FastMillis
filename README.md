@@ -11,7 +11,7 @@ For milliseconds, TIMG0_T1 is configured to run at 2 kHz (because the 16-bit pre
 
 Due to the absence of division, there is no issue at wraparound. It's just a 64-bit counter.
 
-Included is some code to make AceRoutine use fastmillis() and fastmicros(), using the ClockInterface provided.
+Included is some code to make AceRoutine use fastmillis() and fastmicros(), using the ClockInterface provided. If you don't use AceRoutine, just comment it out.
 
 
 
