@@ -25,6 +25,12 @@ static inline uint32_t fastmicros() {
   return TIMG0_T0LO_REG;  // read registers
 }
 
+static inline uint64_t fastmicros64() {
+  TIMG0_T0UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
+  return (TIMG0_T1HI_REG<<32) | TIMG0_T1LO_REG; // due to above feature, we can read the two registers
+                                                // without them changing during the read.
+}
+
 static inline uint32_t fastmillis() {
   TIMG0_T1UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
   uint64_t t = (TIMG0_T1HI_REG<<32) | TIMG0_T1LO_REG;
