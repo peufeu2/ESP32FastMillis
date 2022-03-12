@@ -1,5 +1,5 @@
 # ESP32FastMillis
-- Faster millis() and micros() for ESP32 and AceRoutine
+- Faster *and more accurate* millis() and micros() for ESP32 and AceRoutine
 - Improved OneWire library to make use of them
 - some useful Chrono and Timeout classes, that can be used separately (just replace "fastmillis" with "millis").
 
