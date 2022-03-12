@@ -11,9 +11,9 @@ Worse, this means OneWire does not work. OneWire relies on delayMicroseconds() f
 
 The fix is simple: ESP32 has timers with hardware predividers, so this small piece of code just sets up TIMG0_T0 to run on 1 MHz, dividing APB clock by 80. Then, micros() is just two instructions to read the 32-bit micros value from the timer. It is also possible to read a 64 bit microseconds value.
 
-For milliseconds, TIMG0_T1 is configured to run at 2 kHz (because the 16-bit prescaler can divide 80MHz by 40000 but not 80000) and the code divides the value by two with a bti shift.
+For milliseconds, TIMG0_T1 is configured to run at 2 kHz. The prescaler, being only 16-bit, can divide 80MHz by 40000 but not 80000 which does not fit. The code simply divides the value by two with a bit shift.
 
-Due to the absence of division, there is no issue at wraparound. It's just a 64-bit counter.
+Due to the absence of division, there are no wraparound issues.
 
 The included arduino OneWire library has been modified to make use of this. It also uses an active pull-up, to drive long wires.
 
