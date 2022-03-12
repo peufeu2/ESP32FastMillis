@@ -32,8 +32,9 @@ SOFTWARE.
 
 class Timeout {
 public:
-	uint32_t 	_end_millis;		// when the timeout should end
-	bool 		_expired    = true;
+	// volatile to make it ISR safe
+	volatile uint32_t 	_end_millis;		// when the timeout should end
+	volatile bool 		_expired    = true;
 
 	/*	To prevent 32 bit wraparound with millis(), one of the functions below
 		should be called before 2^30 ms have passed. Once the timeout has expired,
@@ -62,7 +63,7 @@ public:
 
 	/*	Returns time remaining in ms, zero if expired
 	*/
-	int32_t remaining() {
+	int32_t IRAM_ATTR remaining() {
 		if( _expired ) return 0;
 		int r = _end_millis - fastmillis();
 		if( r>0 )
@@ -74,7 +75,7 @@ public:
 
 	/* true if timeout has expired
 	*/
-	bool expired() { return !remaining(); }
+	bool IRAM_ATTR  expired() { return !remaining(); }
 
 	/* 	Sets _expired to true if timeout has expired.
 		Could just call remaining() but if we ignore the result,

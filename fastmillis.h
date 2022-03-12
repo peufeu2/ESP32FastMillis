@@ -44,28 +44,41 @@ void init_TIMG0();
 #define TIMG0_T1HI_REG     (*(volatile unsigned *)(0x3FF5F02C))
 #define TIMG0_T1UPDATE_REG (*(volatile unsigned *)(0x3FF5F030))
 
-static inline uint32_t fastmicros() {
+static inline uint32_t IRAM_ATTR fastmicros() {
   TIMG0_T0UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
   return TIMG0_T0LO_REG;  // read registers
 }
 
-static inline uint64_t fastmicros64() {
+static inline uint64_t IRAM_ATTR fastmicros64() {
   TIMG0_T0UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
-  return (TIMG0_T1HI_REG<<32) | TIMG0_T1LO_REG; // due to above feature, we can read the two registers
-                                                // without them changing during the read.
+  return (TIMG0_T1HI_REG<<32) | TIMG0_T1LO_REG;
 }
 
-static inline uint32_t fastmillis() {
+static inline uint32_t IRAM_ATTR fastmillis() {
   TIMG0_T1UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
   uint64_t t = (TIMG0_T1HI_REG<<32) | TIMG0_T1LO_REG;
   return t>>1;          // we divided by 40000, now divide by 2 to get milliseconds
 }
 
+/*  fastdelayMicroseconds isn't faster (it's a delay!) but it is much more accurate.
+    ESP32 delayMicroseconds() polls micros() which takes a NON-CONSTANT TIME of about 
+    2-3µs to run at 80MHz CPU clock. 
+
+    This one polls fastmicros() which is only 2 instructions, thus constant time.
+
+    Modifying OneWire.cpp to use this, reduces number of read errors substantially.
+*/
+void fastDelayMicroseconds( uint32_t us );
+
+/*  For longer but still somewhat accurate delays, we want to keep interrupts enabled.
+    This function expects interrupts to be DISABLED before it is called.
+    It will enable interrupts during the wait, then DISABLE THEM AGAIN
+    before returning.
+*/
+void fastDelayMicroseconds_withInterrupts( uint32_t us );
 
 /**************************************************************
  *  Make AceRoutine use fastmicros()
- *  This bit copypasted from AceRoutine
- *  https://github.com/bxparks/AceRoutine/blob/develop/src/ace_routine/ClockInterface.h
  **************************************************************/
 
 class FastClockInterface {

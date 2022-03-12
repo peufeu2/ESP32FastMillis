@@ -33,6 +33,9 @@ SOFTWARE.
  **************************************************************/
 
 void init_TIMG0() {
+	timerBegin(0, 80, true);
+	timerBegin(1, 40000, true);
+	return;
 
 	// divide APB_CLK by 80 to get 1MHz, for 1µs timer
 	unsigned divider = 80;
@@ -45,3 +48,42 @@ void init_TIMG0() {
 	TIMG0_T1CONFIG_REG = 0xC0000000 | (divider<<13);
 }
 
+void IRAM_ATTR fastDelayMicroseconds(uint32_t us)
+{
+    if( !us ) return;
+    uint32_t m = fastmicros();
+    uint32_t e = (m + us);
+    if(m > e){ //overflow
+        while(fastmicros() > e){
+            NOP();
+        }
+    }
+    while(fastmicros() < e){
+        NOP();
+    }
+}
+
+void fastDelayMicroseconds_withInterrupts( uint32_t us ) {
+    if( !us ) return;
+    uint32_t m = fastmicros();
+
+    interrupts();
+
+    /*  Wait with interrupts enabled.
+        We stop 50µs before the end.
+    */
+
+    uint32_t e = (m + us);
+    while( int32_t(e - fastmicros()) > 50 )
+        NOP();
+
+    noInterrupts();
+
+    /*  As we get near the end of the delay,
+        enable interrupts again to get a more
+        accurate end time.
+    */
+
+    while( int32_t(e - fastmicros()) >= 0 )
+        NOP();
+}
