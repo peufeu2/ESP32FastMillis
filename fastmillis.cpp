@@ -42,10 +42,40 @@ void init_TIMG0() {
 	TIMG0_T0CONFIG_REG = 0x00000000 | (divider<<13);	// timer must be disabled to change prescaler setting
 	TIMG0_T0CONFIG_REG = 0xC0000000 | (divider<<13);
 
+    TIMG0_T0LOAD_LO_REG = 0xFF000000;
+    TIMG0_T0LOAD_HI_REG = 0;
+    TIMG0_T0LOAD_REG = 1;
+
 	// divide APB_CLK by 40000 to get 2kHz, for 0.5ms timer (max divider is 65536)
 	divider = 40000;
 	TIMG0_T1CONFIG_REG = 0x00000000 | (divider<<13);	// timer must be disabled to change prescaler setting
 	TIMG0_T1CONFIG_REG = 0xC0000000 | (divider<<13);
+
+    TIMG0_T1LOAD_LO_REG = 0xFF000000;
+    TIMG0_T1LOAD_HI_REG = 0;
+    TIMG0_T1LOAD_REG = 1;
+}
+
+uint32_t IRAM_ATTR fastmillis() {
+  TIMG0_T1UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
+  uint32_t lo, lo2, hi;
+  do {
+    lo = TIMG0_T1LO_REG;
+    hi = TIMG0_T1HI_REG;
+    lo2 = TIMG0_T1LO_REG;
+  } while( lo != lo2 );
+  return (uint64_t(hi)<<32) | (lo>>1); // we divided by 40000, now divide by 2 to get milliseconds
+}
+
+uint64_t IRAM_ATTR fastmicros64() {
+  TIMG0_T0UPDATE_REG = 0; // write here to tell the hardware to copy counter value into read registers
+  uint32_t lo, lo2, hi;
+  do {
+    lo = TIMG0_T0LO_REG;
+    hi = TIMG0_T0HI_REG;
+    lo2 = TIMG0_T0LO_REG;
+  } while( lo != lo2 );
+  return (uint64_t(hi)<<32) | lo;
 }
 
 void IRAM_ATTR fastDelayMicroseconds(uint32_t us)
@@ -80,7 +110,7 @@ void fastDelayMicroseconds_withInterrupts( uint32_t us ) {
     noInterrupts();
 
     /*  As we get near the end of the delay,
-        enable interrupts again to get a more
+        disable interrupts again to get a more
         accurate end time.
     */
 
