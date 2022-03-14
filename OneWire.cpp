@@ -218,14 +218,17 @@ void OneWire::write_bit(uint8_t v)
         DIRECT_MODE_OUTPUT(reg, mask);  // drive output low
         fastDelayMicroseconds( tLOW1 );       
         DIRECT_WRITE_HIGH(reg, mask);   // drive output high
+        fastDelayMicroseconds( tAPU );  // active pullup time    
+        DIRECT_MODE_INPUT(reg, mask);   // return to input mode and let the pullup do the job (safer)
         interrupts();
-        fastDelayMicroseconds( tSLOT - tLOW1 );      // total slot time tSLOT = 60-120µs = tLOW1 + this delay
+        fastDelayMicroseconds( tSLOT - tLOW1 - tAPU);      // total slot time tSLOT = 60-120µs = tLOW1 + this delay
     } else {
         noInterrupts();
         DIRECT_WRITE_LOW(reg, mask);
         DIRECT_MODE_OUTPUT(reg, mask);  // drive output low
-        fastDelayMicroseconds( tLOW0 );      // tLOW0 is 60-120µs
+        fastDelayMicroseconds( tLOW0 ); // tLOW0 is 60-120µs
         DIRECT_WRITE_HIGH(reg, mask);   // drive output high
+        DIRECT_MODE_INPUT(reg, mask);
         interrupts();
         fastDelayMicroseconds( tSLOT - tLOW0 );     // total slot time tSLOT = 60-120µs = tLOW0 + this delay
     }
