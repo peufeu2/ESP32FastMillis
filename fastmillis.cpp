@@ -93,27 +93,17 @@ void IRAM_ATTR fastDelayMicroseconds(uint32_t us)
     }
 }
 
-void fastDelayMicroseconds_withInterrupts( uint32_t us ) {
+void IRAM_ATTR accurateDelayMicroseconds(uint32_t us)
+{
     if( !us ) return;
-    uint32_t m = fastmicros();
-
-    interrupts();
-
-    /*  Wait with interrupts enabled.
-        We stop 50µs before the end.
-    */
-
-    uint32_t e = (m + us);
-    while( int32_t(e - fastmicros()) > 50 )
+    uint32_t m = xthal_get_ccount();
+    uint32_t e = m + us*CPU_FREQUENCY_MHZ - 44;     // substract some cycles to account for function call
+    if(m > e){ //overflow
+        while(xthal_get_ccount() > e){
+            NOP();
+        }
+    }
+    while(xthal_get_ccount() < e){
         NOP();
-
-    noInterrupts();
-
-    /*  As we get near the end of the delay,
-        disable interrupts again to get a more
-        accurate end time.
-    */
-
-    while( int32_t(e - fastmicros()) >= 0 )
-        NOP();
+    }
 }

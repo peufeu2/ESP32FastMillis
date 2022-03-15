@@ -24,7 +24,23 @@ SOFTWARE.
 
 #pragma once
 
-#include <AceRoutine.h>
+/**************************************************************
+ *  Implementation of interrupt disable
+ **************************************************************/
+
+/* interrupts() / noInterrupts() does not disable interrupts */
+
+/* does not disable interrupts */
+// #define timeCriticalEnter() do { static unsigned   esp_int_level = portSET_INTERRUPT_MASK_FROM_ISR();
+// #define timeCriticalExit()   portCLEAR_INTERRUPT_MASK_FROM_ISR(esp_int_level); } while(0)
+
+/* this works */
+#undef noInterrupts()
+#undef interrupts()
+
+#define timeCriticalEnter() {portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;portENTER_CRITICAL(&mux);
+#define timeCriticalExit() portEXIT_CRITICAL(&mux);}
+
 
 /**************************************************************
  * 	Much faster millis() / micros() implementation
@@ -95,49 +111,84 @@ static inline uint64_t IRAM_ATTR fastmicros64_isr() {
 
     This one polls fastmicros() which is only 2 instructions, thus constant time.
 
-    Modifying OneWire.cpp to use this, reduces number of read errors substantially.
+    Note accuracy is 1µs due to using a 1MHz timer. If the function begins when the
+    timer is about to count up, then the first microsecond will be truncated.
+
 */
 void fastDelayMicroseconds( uint32_t us );
 
-/*  For longer but still somewhat accurate delays, we want to keep interrupts enabled.
-    This function expects interrupts to be DISABLED before it is called.
-    It will enable interrupts during the wait, then DISABLE THEM AGAIN
-    before returning.
+
+/*  This one polls xthal_get_ccount() which is a CPU register counting clock cycles,
+    so it will be the most accurate of all, but it depends on #define CPU_FREQUENCY_MHZ 
+    to be there and the clock frequency to actually be set to that value.
+
+    It is only usable (and should only be used) for short delays, since the number of 
+    CPU cycles has to fit into 31 bits.
 */
-void fastDelayMicroseconds_withInterrupts( uint32_t us );
+void accurateDelayMicroseconds( uint32_t us );
 
-/**************************************************************
- *  Make AceRoutine use fastmicros()
- **************************************************************/
+/*  
+    When bit-banging signals...
 
-class FastClockInterface {
-  public:
-    /** Get the current millis. */
-    static unsigned long millis() { return ::fastmillis(); }
+    output(1)
+    delayMicroseconds( period );
+    output(0)
+    delayMicroseconds( period );
+    output(1)
+    etc...
 
-    /** Get the current micros. */
-    static unsigned long micros() { return ::fastmicros(); }
+    When we get to the third delay, errors on each individual delay add up,
+    plus the time taken to execute the instructions in-between.
 
-    /**
-     * Get the current seconds. This is derived by dividing millis() by 1000,
-     * which works pretty well until the `unsigned long` rolls over at
-     * 4294967296 milliseconds. At that last second (4294967), this function
-     * returns the next second (0) a little bit too early. More precisely, it
-     * rolls over to 0 seconds 704 milliseconds too early. If the
-     * COROUTINE_DELAY_SECONDS() is large enough, this inaccuracy should not
-     * matter too much.
-     *
-     * The other problem with this function is that on 8-bit processors without
-     * a hardware division instruction, the software long division by 1000 is
-     * very expensive in both memory and CPU. The flash memory increases by
-     * about 150 bytes on AVR processors. Therefore, the
-     * COROUTINE_DELAY_SECONDS() should be used sparingly.
-     */
-    static unsigned long seconds() { return ::fastmillis() / 1000; }
+    This class takes a snapshot of the cycle counter, and all calls to waitUntil()
+    refer to that. So the above would become:
+
+    MultiDelay d;
+    output(1)
+    d.waitUntilMicros( period );
+    output(0)
+    d.waitUntilMicros( period*2 );
+    output(1)
+    etc...
+
+    And errors will not accumulate.
+
+*/
+class MultiDelay {
+public:
+    uint32_t start_cycles;
+
+    inline __attribute__((always_inline)) 
+    void reset() {
+        start_cycles = xthal_get_ccount(); 
+    }
+
+    inline __attribute__((always_inline)) 
+    MultiDelay() { 
+        reset(); 
+    }
+
+    /*  Waits until we're "us" later than when reset() was called.
+    */
+    inline __attribute__((always_inline)) 
+    void waitUntilMicros( int us ) { 
+        waitUntilCycles( us*CPU_FREQUENCY_MHZ );
+    }
+
+    /*  Waits until we're "cycles" cpu cycles later than when reset() was called.
+    */
+    inline __attribute__((always_inline)) 
+    void waitUntilCycles( int cycles ) { 
+        while( (int)(xthal_get_ccount() - start_cycles) < cycles ) ;
+    }
+
+    inline __attribute__((always_inline)) 
+    int elapsedCycles() {
+        return xthal_get_ccount() - start_cycles; 
+    }
 };
 
-// using namespace ace_routine;
 
-// Use fastmicros() for aceroutine
-using Coroutine = ace_routine::CoroutineTemplate<FastClockInterface>;
-using CoroutineScheduler = ace_routine::CoroutineSchedulerTemplate<Coroutine>;
+
+
+

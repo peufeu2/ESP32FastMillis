@@ -1,4 +1,7 @@
 /*
+
+2022 - modified by peufeu to work on ESP32 (only).
+
 Copyright (c) 2007, Jim Studt  (original old version - many contributors since)
 
 The latest version of this library may be found at:
@@ -63,10 +66,10 @@ Version 2.0: Modifications by Paul Stoffregen, January 2010:
 http://www.pjrc.com/teensy/td_libs_OneWire.html
   Search fix from Robin James
     http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1238032295/27#27
-  Use direct optimized I/O in all cases
-  Disable interrupts during timing critical sections
+  Use pin optimized I/O in all cases
+  Disable timeCriticalExit during timing critical sections
     (this solves many random communication errors)
-  Disable interrupts during read-modify-write I/O
+  Disable timeCriticalExit during read-modify-write I/O
   Reduce RAM consumption by eliminating unnecessary
     variables and trimming many to 8 bits
   Optimize both crc8 - table version moved to flash
@@ -79,7 +82,7 @@ http://www.arduino.cc/cgi-bin/yabb2/YaBB.pl?num=1238032295/27#27
 Updated to work with arduino-0008 and to include skip() as of
 2007/07/06. --RJL20
 
-Modified to calculate the 8-bit CRC directly, avoiding the need for
+Modified to calculate the 8-bit CRC pinly, avoiding the need for
 the 256-byte lookup table to be loaded in RAM.  Tested in arduino-0010
 -- Tom Pollard, Jan 23, 2008
 
@@ -141,21 +144,60 @@ sample code bearing this copyright.
 
 #include <Arduino.h>
 #include "OneWire.h"
-#include "util/OneWire_direct_gpio.h"
-#include "fastmillis.h"
 
-void OneWire::begin(uint8_t pin)
+#include "config.h"
+#include "fastmillis.h"
+#include "fastmillis_coro.h"
+
+// Reset LOW duration
+#define tRSTL   500
+
+// Write 0 bit LOW duration, 60-120µs
+#define tLOW0 60
+
+// Write 1 bit LOW duration, 1-15µs
+#define tLOW1 9
+
+// Active pull-up time, µs
+#define tAPU 2
+
+// Slot time, 60-120µs = maximum tLOW + tHIGH, so must be higher than both values above
+#define tSLOT 80
+
+// For reads, time to drive the wire low
+#define tDRIVElow 9
+
+// For read, time to sample, counted from the beginning of the low pulse
+#define tRDV 18
+
+// this includes an oscilloscope
+// ace_routine::LinearHistogramCoroutineProfiler    profile_onewire( 30*CPU_FREQUENCY_MHZ );
+// ace_routine::LinearHistogramCoroutineProfiler    profile_onewire_s( 30*CPU_FREQUENCY_MHZ );
+
+void OneWire::begin( uint8_t _pin )
 {
-	pinMode(pin, INPUT);
-	bitmask = PIN_TO_BITMASK(pin);
-	baseReg = PIN_TO_BASEREG(pin);
+    pin = _pin;
+    pinMode(pin, INPUT);
+
+    // profile_onewire.begin("ow","run",FastClockInterface::cycles_per_second());
+    // profile_onewire_s.begin("ows","run",FastClockInterface::cycles_per_second());
+
+    if( pin >= 32 )
+        Serial.println( "OneWire needs pin<32" );
+
+	bitmask = 1 << pin;
+
+    uint32_t pinFunction((uint32_t)2 << FUN_DRV_S); // what are the drivers?
+    pinFunction |= FUN_IE; // input enable but required for output as well?
+    pinFunction |= ((uint32_t)2 << MCU_SEL_S);
+
+    ESP_REG(DR_REG_IO_MUX_BASE + esp32_gpioMux[pin].reg) = pinFunction;
+
 #if ONEWIRE_SEARCH
 	reset_search();
 #endif
 }
 
-// Active pull-up time, µs
-#define tAPU 2
 
 // Perform the onewire reset function.  We will wait for
 // the bus to come high, if it doesn't then it is broken or shorted
@@ -163,45 +205,33 @@ void OneWire::begin(uint8_t pin)
 //
 // Returns 1 if a device asserted a presence pulse, 0 otherwise.
 //
-uint8_t OneWire::reset(void)
+bool OneWire::reset(void)
 {
-    IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
-    volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
-    uint8_t r;
-    uint8_t retries = 125;
+    bool r;
+    unsigned retries = 125;
 
-    noInterrupts();
-    DIRECT_MODE_INPUT(reg, mask);
-    interrupts();
+    pinInput();
     // wait until the wire is high... just in case
     do {
         if (--retries == 0) return 0;
-        fastDelayMicroseconds(2);
-    } while ( !DIRECT_READ(reg, mask));
+        delayMicroseconds(2);
+    } while ( !pinRead() );
 
-    noInterrupts();
-    DIRECT_WRITE_LOW(reg, mask);
-    DIRECT_MODE_OUTPUT(reg, mask);  // drive output low
-    fastDelayMicroseconds_withInterrupts(500);     // tRSTL minimum 480µs
-    DIRECT_WRITE_HIGH(reg, mask);
-    fastDelayMicroseconds(tAPU);       // active pullup
-    DIRECT_MODE_INPUT(reg, mask);                       // allow it to float
-    fastDelayMicroseconds(70-tAPU);    // aim for right after tPDL goes down
-    r = !DIRECT_READ(reg, mask);
-    interrupts();
-    fastDelayMicroseconds(410);
+    MultiDelay d;
+    timeCriticalEnter() {
+        d.reset();
+        pinLow();
+        pinOutput();  // drive output low
+        d.waitUntilMicros( tRSTL );       // tRSTL minimum 480µs
+        pinHigh();
+        d.waitUntilMicros( tRSTL+tAPU );  // active pullup
+        pinInput();                       // allow it to float
+        d.waitUntilMicros( tRSTL + 70 );  // aim for right after tPDL goes down
+        r = !pinRead();
+    } timeCriticalExit();
+    delayMicroseconds(410);
     return r;
 }
-
-
-// 1-15µs
-#define tLOW1 8     
-
-// 60-120µs
-#define tLOW0 70
-
-// 60-120µs = maximum tLOW + tHIGH, so must be higher than both values above
-#define tSLOT 80
 
 //
 // Write a bit. Port and bit is used to cut lookup time and provide
@@ -209,109 +239,79 @@ uint8_t OneWire::reset(void)
 //
 void OneWire::write_bit(uint8_t v)
 {
-    IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
-    volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
-
+    MultiDelay d;
     if (v & 1) {
-        noInterrupts();
-        DIRECT_WRITE_LOW(reg, mask);
-        DIRECT_MODE_OUTPUT(reg, mask);  // drive output low
-        fastDelayMicroseconds( tLOW1 );       
-        DIRECT_WRITE_HIGH(reg, mask);   // drive output high
-        fastDelayMicroseconds( tAPU );  // active pullup time    
-        DIRECT_MODE_INPUT(reg, mask);   // return to input mode and let the pullup do the job (safer)
-        interrupts();
-        fastDelayMicroseconds( tSLOT - tLOW1 - tAPU);      // total slot time tSLOT = 60-120µs = tLOW1 + this delay
+        timeCriticalEnter() {
+            d.reset();
+            pinLow();
+            pinOutput();  // drive output low
+            d.waitUntilMicros( tLOW1 );       
+            // pinHigh();   // drive output high
+            // d.waitUntilMicros( tLOW1 + tAPU ); // active pullup time    
+            pinInput();   // return to input mode and let the pullup do the job (safer)
+        } timeCriticalExit();
     } else {
-        noInterrupts();
-        DIRECT_WRITE_LOW(reg, mask);
-        DIRECT_MODE_OUTPUT(reg, mask);  // drive output low
-        fastDelayMicroseconds( tLOW0 ); // tLOW0 is 60-120µs
-        DIRECT_WRITE_HIGH(reg, mask);   // drive output high
-        DIRECT_MODE_INPUT(reg, mask);
-        interrupts();
-        fastDelayMicroseconds( tSLOT - tLOW0 );     // total slot time tSLOT = 60-120µs = tLOW0 + this delay
+        timeCriticalEnter() {
+            d.reset();
+            pinLow();
+            pinOutput();  // drive output low
+            d.waitUntilMicros( tLOW0 ); // tLOW0 is 60-120µs
+            // pinHigh();   // drive output high
+            pinInput();
+        } timeCriticalExit();
     }
+    d.waitUntilMicros( tSLOT );
 }
-
-#define tDRIVElow 4
-#define tRDV 11
 
 //
 // Read a bit. Port and bit is used to cut lookup time and provide
 // more certain timing.
 //
-uint8_t OneWire::read_bit(void)
+
+bool OneWire::read_bit(void)
 {
-    IO_REG_TYPE mask IO_REG_MASK_ATTR = bitmask;
-    volatile IO_REG_TYPE *reg IO_REG_BASE_ATTR = baseReg;
-    uint8_t r;
-    unsigned slot_end_time;
+    bool r;
+    // int transition_time;
+    MultiDelay d;
+    timeCriticalEnter() {
+        d.reset();
+        pinOutput();      // drive output low
+        pinLow();
+        d.waitUntilMicros( tDRIVElow );
+        pinInput();     // let pin float, resistor pull up only
 
-    noInterrupts();
+        // This is for profiling only
+        // for(;;) {
+        //     transition_time = d.elapsedCycles();
+        //     if( pinRead() || transition_time > tSLOT * CPU_FREQUENCY_MHZ ) 
+        //         break;
+        // }
+        d.waitUntilMicros( tRDV );
+        r = pinRead();
+    } timeCriticalExit();
 
-    slot_end_time = fastmicros() + tSLOT;
+    // profile_onewire.profileRun( transition_time );
+    d.waitUntilMicros( tSLOT );
 
-    DIRECT_MODE_OUTPUT(reg, mask);      // drive output low
-    DIRECT_WRITE_LOW(reg, mask);
-    fastDelayMicroseconds( tDRIVElow );
-
-    DIRECT_WRITE_HIGH(reg, mask);      // drive output high (active pullup) to charge wire if slave is not outputting 0
-    fastDelayMicroseconds( tAPU );    // pulse is about 1µs longer than this value
-    DIRECT_MODE_INPUT(reg, mask);      // let pin float, resistor pull up only
-    fastDelayMicroseconds( tRDV - tAPU - tDRIVElow ); // substract active pullup time
-
-    r = DIRECT_READ(reg, mask);
-    interrupts();
-
-    bool pulled_up = false;
-
-    // Wait for next cycle, and while doing so, turn on active pullup 
-    // when slave releases wire
-    while( (int)(slot_end_time-fastmicros()) >= 0 )
-    {
-        if( !pulled_up && DIRECT_READ(reg, mask) )
-        {
-            DIRECT_WRITE_HIGH(reg, mask);            
-            DIRECT_MODE_OUTPUT(reg, mask);
-            fastDelayMicroseconds(tAPU);    // pulse is about 1µs longer than this value
-            DIRECT_MODE_INPUT(reg, mask);
-            pulled_up = true;
-        }
-    }
+    // return transition_time < tRDV * CPU_FREQUENCY_MHZ;
     return r;
 }
 
-//
-// Write a byte. The writing code uses the active drivers to raise the
-// pin high, if you need power after the write (e.g. DS18S20 in
-// parasite power mode) then set 'power' to 1, otherwise the pin will
-// go tri-state at the end of the write to avoid heating in a short or
-// other mishap.
-//
-void OneWire::write(uint8_t v, uint8_t power /* = 0 */) {
+void OneWire::write( uint8_t v, bool parasite ) {
     uint8_t bitMask;
 
     for (bitMask = 0x01; bitMask; bitMask <<= 1) {
 	OneWire::write_bit( (bitMask & v)?1:0);
     }
-    if ( !power ) {
-	noInterrupts();
-	DIRECT_MODE_INPUT(baseReg, bitmask);
-	DIRECT_WRITE_LOW(baseReg, bitmask);
-	interrupts();
-    }
+	pinInput();
+	pinLow();
 }
 
-void OneWire::write_bytes(const uint8_t *buf, uint16_t count, bool power /* = 0 */) {
-  for (uint16_t i = 0 ; i < count ; i++)
-    write(buf[i]);
-  if (!power) {
-    noInterrupts();
-    DIRECT_MODE_INPUT(baseReg, bitmask);
-    DIRECT_WRITE_LOW(baseReg, bitmask);
-    interrupts();
-  }
+void OneWire::write_bytes(const uint8_t *buf, uint16_t count, bool parasite ) {
+    for (uint16_t i = 0 ; i < count ; i++)
+        write(buf[i]);
+    pinInput();
+    pinLow();
 }
 
 //
@@ -350,13 +350,6 @@ void OneWire::select(const uint8_t rom[8])
 void OneWire::skip()
 {
     write(0xCC);           // Skip ROM
-}
-
-void OneWire::depower()
-{
-	noInterrupts();
-	DIRECT_MODE_INPUT(baseReg, bitmask);
-	interrupts();
 }
 
 #if ONEWIRE_SEARCH
@@ -414,7 +407,7 @@ bool OneWire::search(uint8_t *newAddr, bool search_mode /* = true */)
    bool    search_result;
    uint8_t id_bit, cmp_id_bit;
 
-   unsigned char rom_byte_mask, search_direction;
+   unsigned char rom_byte_mask, search_pinion;
 
    // initialize for search
    id_bit_number = 1;
@@ -454,18 +447,18 @@ bool OneWire::search(uint8_t *newAddr, bool search_mode /* = true */)
          } else {
             // all devices coupled have 0 or 1
             if (id_bit != cmp_id_bit) {
-               search_direction = id_bit;  // bit write value for search
+               search_pinion = id_bit;  // bit write value for search
             } else {
                // if this discrepancy if before the Last Discrepancy
                // on a previous next then pick the same as last time
                if (id_bit_number < LastDiscrepancy) {
-                  search_direction = ((ROM_NO[rom_byte_number] & rom_byte_mask) > 0);
+                  search_pinion = ((ROM_NO[rom_byte_number] & rom_byte_mask) > 0);
                } else {
                   // if equal to last pick 1, if not then pick 0
-                  search_direction = (id_bit_number == LastDiscrepancy);
+                  search_pinion = (id_bit_number == LastDiscrepancy);
                }
                // if 0 was picked then record its position in LastZero
-               if (search_direction == 0) {
+               if (search_pinion == 0) {
                   last_zero = id_bit_number;
 
                   // check for Last discrepancy in family
@@ -476,13 +469,13 @@ bool OneWire::search(uint8_t *newAddr, bool search_mode /* = true */)
 
             // set or clear the bit in the ROM byte rom_byte_number
             // with mask rom_byte_mask
-            if (search_direction == 1)
+            if (search_pinion == 1)
               ROM_NO[rom_byte_number] |= rom_byte_mask;
             else
               ROM_NO[rom_byte_number] &= ~rom_byte_mask;
 
-            // serial number search direction write bit
-            write_bit(search_direction);
+            // serial number search pinion write bit
+            write_bit(search_pinion);
 
             // increment the byte counter id_bit_number
             // and shift the mask rom_byte_mask
@@ -557,7 +550,7 @@ uint8_t OneWire::crc8(const uint8_t *addr, uint8_t len)
 }
 #else
 //
-// Compute a Dallas Semiconductor 8 bit CRC directly.
+// Compute a Dallas Semiconductor 8 bit CRC pinly.
 // this is much slower, but a little smaller, than the lookup table.
 //
 uint8_t OneWire::crc8(const uint8_t *addr, uint8_t len)
