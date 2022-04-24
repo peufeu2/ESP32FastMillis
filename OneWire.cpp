@@ -147,7 +147,7 @@ sample code bearing this copyright.
 
 #include "config.h"
 #include "fastmillis.h"
-#include "fastmillis_coro.h"
+//#include "fastmillis_coro.h"
 
 // Reset LOW duration
 #define tRSTL   500
