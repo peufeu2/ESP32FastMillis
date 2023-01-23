@@ -3,7 +3,7 @@
 - Improved OneWire library to make use of them.
 - some useful Chrono and Timeout classes, that can be used separately (just replace "fastmillis" with "millis").
 
-Implementation of micros() on ESP32 is quite complicated, because it uses a 64 bit counter clocked on the CPU frequency, which requires a 64-bit division. In addition, the code checks for wraparounds etc. This means micros() takes non-constant time, around 2-3µs with 80MHz CPU frequency.
+Implementation of micros() on ESP32 is quite complicated, because it uses a 64 bit counter clocked on the CPU frequency, and that requires a 64-bit division to get microseconds from CPU cycle count. In addition, the code checks for wraparounds etc. This means micros() takes non-constant time, around 2-3µs with 80MHz CPU frequency.
 
 This wastes time (in my app, CoroutineScheduler was calling micros() about 15000 times per second).
 
