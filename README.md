@@ -19,5 +19,7 @@ The included arduino OneWire library has been modified to make use of this. It a
 
 Included is some code to make AceRoutine use fastmillis() and fastmicros(), using the ClockInterface provided. If you don't use AceRoutine, just comment it out.
 
+This was written for ESP32 with Xtensa core (WROOM-32). I have been told that it doesn't work on the ESP32 with a Risc-V core (see issues). GPIOs and timers are different on this chip, so it is expected that slightly "bare metal" code like this one would not port. I don't have any projects involving ESP32-S3 at the moment, so that will have to wait, unless someone steps in.
+
 
 
